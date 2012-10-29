@@ -5,8 +5,9 @@ Created on 2012-10-19
 '''
 from __future__ import division
 import time
-import globals
+import commons
 import os
+import random
 
 
 LOGPATH = "." + os.altsep + "log.dat"
@@ -14,6 +15,7 @@ numoffeatures = 0
 precision = [0.0 for x in range(5)]
 recall = [0.0 for x in range(5)]
 f1 = [0.0 for x in range(5)]
+kernelvalue = [[0.0 for x in range(commons.MAX)] for x in range(commons.MAX)]
 #configs
 C = 1
 TOL = 0.01 #numerical tolerance 
@@ -32,7 +34,6 @@ def GetLines(filenamelist):
 def GetX(line):
     x = [0 for item in range(numoffeatures)]
     #print "numoffeatures:" + str(numoffeatures),
-
     line = line[3:len(line)]
     pairlist = line.split(' ')
     for pair in pairlist:
@@ -43,7 +44,7 @@ def GetX(line):
 
 
 def Kernel(x1,x2):
-    '''the kernel function'''
+    '''the kernelvalue function'''
     result = 0.0
     for i in range(len(x1)):
         result += x1[i] * x2[i]
@@ -51,13 +52,16 @@ def Kernel(x1,x2):
 
 
 def GetU(x,y,alpha,b):
-    '''u = all[yi * alphai * kernel(xi,xtarget)] - b'''
+    '''u = all[yi * alphai * kernelvalue(xi,xtarget)] - b'''
+    print "[Info]Getting u..."
+    global kernelvalue
     result = [0 for item in range(len(x))]
     for iterate in range(len(x)):
         targetx = x[iterate]
         for i in range(len(x)):
-            result[iterate] += y[i] * alpha[i] * kernel(x[i], targetx)
+            result[iterate] += y[i] * alpha[i] * kernelvalue[iterate][i] 
         result[iterate] -= b
+    print "[Info]Getting u complete."
     return result
 
 
@@ -104,9 +108,9 @@ def Takestep(index_i,index_j,x,y,alpha,u,b):
     (L,H) = GenLH(yi,yj,alpha_i,alpha_j)
     if L == H:
         return (alpha,u,b,changed)
-    kii = kernel(x[index_i],x[index_i])
-    kjj = kernel(x[index_j],x[index_j])
-    kij = kernel(x[index_i],x[index_j])
+    kii = Kernel(x[index_i],x[index_i])
+    kjj = Kernel(x[index_j],x[index_j])
+    kij = Kernel(x[index_i],x[index_j])
     eta = kii + kjj - 2 * kij
     if eta != 0:
         alpha_j_new = alpha_j + yj * (ei - ej) / eta
@@ -131,6 +135,15 @@ def Takestep(index_i,index_j,x,y,alpha,u,b):
     return (alpha,u,b,changed)
 
 
+
+def GenKernel(x):
+    global kernelvalue
+    for i in range(len(x)):
+        for j in range(len(x)):
+            print "[Info]GenKernel:%d_%d" % (i,j)
+            kernelvalue[i][j] = Kernel(x[i],x[j])
+
+
 def examineExample(index_i,x,y,alpha,u,b):
     '''exmaine index_i and get index_j to Takestep.'''
     alpha_i = alpha[index_i]
@@ -146,7 +159,7 @@ def examineExample(index_i,x,y,alpha,u,b):
             (alpha,u,b,changed) = Takestep(index_i,index_j,x,y,alpha,u,b)
             if changed:
                 return (alpha,u,b,changed)
-        loopshuffle = random.shuffle([item in range(len(alpha))])
+        loopshuffle = random.shuffle([item for item in range(len(alpha))])
         #loop all  0 < alpha < c from random item
         for index_j in loopshuffle:
             if alpha[index_j] > 0 and alpha[index_j] < C:
@@ -177,60 +190,47 @@ def Train(filenamelist):
         y[i] = int(line[0:2])
         x[i] = GetX(line)
         i += 1
+    GenKernel(x)
     u = GetU(x,y,alpha,b)
     alphachanged = False
+    alphachanged_num = 0
     exmainall = True
-    while alphachanged or exmainall:
+    loopout = 0
+    loopin = 0
+    while alphachanged_num > 5 or exmainall:
         alphachanged = False
+        alphachanged_num = 0
+        loopin = 0
         if exmainall:
             #loop all examples
             for i in range(numofexample):
+                print "[Info]Loopout %s ;Loopin %s" % (str(loopout),str(loopin))
+                loopin += 1
                 (alpha,u,b,alphachanged) = examineExample(i,x,y,alpha,u,b)
+                if alphachanged:
+                    alphachanged_num += 1
         else:
             #loop all alpha != 0 and C
             for i in range(numofexample):
                 if alpha[i] >0 and alpha[i] < C:
+                    print "[Info]Loopout %s ;Loopin %s" % (str(loopout),str(loopin))
+                    loopin += 1
                     (alpha,u,b,alphachanged) = examineExample(i,x,y,alpha,u,b)
+                    if alphachanged:
+                        alphachanged_num += 1
         if exmainall:
             exmainall = 0
         elif not alphachanged:
             exmainall = 1
-    #TODO: calculate w from alpha x y
+        loopout += 1
+    #calculate w from alpha x y
     for iterate in range(numoffeatures):
         for in_iterate in range(numofexample):
             w[iterate] += alpha[in_iterate] * y[in_iterate] * x[in_iterate][iterate]
     return (w,b)
 
 
-
-def Train_old(filenamelist):
-    '''train perceptron with given data.'''
-    linelist = GetLines(filenamelist)
-    w = [0 for item in range(numoffeatures)]
-    y = [0 for item in range(globals.MAX)]
-    x_seed = [0 for item in range(numoffeatures)]
-    x = [x_seed for item in range(globals.MAX)]
-    i = 0
-    for line in linelist:
-        y[i] = int(line[0:2])
-        x[i] = GetX(line)
-        i += 1
-    length = i
-    print "[Info]Working...",
-    for convergence in range(globals.TIMES):
-        for i in range(length): # loop all lines in four file.
-            print "[Info]convergence" + str(convergence) + "...line" + str(i)
-            #print ".",
-            p = 0
-            for j in range(numoffeatures):
-                p += w[j] * x[i][j]
-            if y[i] * p <= 0:
-                for j in range(numoffeatures):
-                    w[j] += globals.ALPHA * y[i] * x[i][j]
-    #print "."
-    return w
-
-#TODO: change test adding b
+#u = wx - b
 def Test(w,b,filenamelist):
     linelist = GetLines(filenamelist)
     resultlist = []
@@ -247,7 +247,6 @@ def Test(w,b,filenamelist):
             y_p = 1 #class2
         result = {'actual':y, 'predicted':y_p}
         resultlist.append(result)
-    #print resultlist
     return resultlist
 
 
@@ -279,58 +278,60 @@ def Evaluate(resultlist,index):
     f1[index-1] = 2 * precision[index-1] * recall[index-1] / (precision[index-1] + recall[index-1])
     print "[Data]f1:" + str(f1[index-1])
 
-
-#TODO: change train back value to turple    
+  
 def SMO():
     '''Use perceptron to train model with 4/5 of the data and 1/5 as test data.'''
-    "TODO"
     #loop 5 times
     global numoffeatures
     global precision
     global recall
     global f1
-    numff = open(globals.NUMOFFEATURESPATH,"r")
+    numff = open(commons.NUMOFFEATURESPATH,"r")
     numoffeatures = int(numff.read())
     numff.close()
     print "Features:" + str(numoffeatures)
-    print "[Info]Loop times:" + str(globals.TIMES)
+    #print "[Info]Loop times:" + str(commons.TIMES)
     print "[Info]Loop1."
     print "[Info]Loop1 training."
-    (w,b) = Train([globals.FEATURELIST[1],globals.FEATURELIST[2],globals.FEATURELIST[3],globals.FEATURELIST[4]])
+    (w,b) = Train([commons.FEATURELIST[1],commons.FEATURELIST[2],commons.FEATURELIST[3],commons.FEATURELIST[4]])
     print "[Info]Loop1 testing."
-    resultlist = Test(w,b,[globals.FEATURELIST[0]])
+    resultlist = Test(w,b,[commons.FEATURELIST[0]])
     print "[Info]Loop1 evaluating."
     Evaluate(resultlist,1)
-
+    print "1:precision: %s" % str(precision[0])
+    print "1:recall %s" % str(recall[0])
+    print "1:f1: %s" % str(f1[0])
+    raw_input("Press any key to continue loop2.")
+    
     print "[Info]Loop2."
     print "[Info]Loop2 training."
-    w = Train([globals.FEATURELIST[0],globals.FEATURELIST[2],globals.FEATURELIST[3],globals.FEATURELIST[4]])
+    (w,b) = Train([commons.FEATURELIST[0],commons.FEATURELIST[2],commons.FEATURELIST[3],commons.FEATURELIST[4]])
     print "[Info]Loop2 testing."
-    resultlist = Test(w,[globals.FEATURELIST[1]])
+    resultlist = Test(w,b,[commons.FEATURELIST[1]])
     print "[Info]Loop2 evaluating."
     Evaluate(resultlist,2)
 
     print "[Info]Loop3."
     print "[Info]Loop3 training."
-    w = Train([globals.FEATURELIST[0],globals.FEATURELIST[1],globals.FEATURELIST[3],globals.FEATURELIST[4]])
+    (w,b) = Train([commons.FEATURELIST[0],commons.FEATURELIST[1],commons.FEATURELIST[3],commons.FEATURELIST[4]])
     print "[Info]Loop3 testing."
-    resultlist = Test(w,[globals.FEATURELIST[2]])
+    resultlist = Test(w,b,[commons.FEATURELIST[2]])
     print "[Info]Loop3 evaluating."
     Evaluate(resultlist,3)
 
     print "[Info]Loop4."
     print "[Info]Loop4 training."
-    w = Train([globals.FEATURELIST[0],globals.FEATURELIST[1],globals.FEATURELIST[2],globals.FEATURELIST[4]])
+    (w,b) = Train([commons.FEATURELIST[0],commons.FEATURELIST[1],commons.FEATURELIST[2],commons.FEATURELIST[4]])
     print "[Info]Loop4 testing."
-    resultlist = Test(w,[globals.FEATURELIST[3]])
+    resultlist = Test(w,b,[commons.FEATURELIST[3]])
     print "[Info]Loop4 evaluating."
     Evaluate(resultlist,4)
 
     print "[Info]Loop5."
     print "[Info]Loop5 training."
-    w = Train([globals.FEATURELIST[0],globals.FEATURELIST[1],globals.FEATURELIST[2],globals.FEATURELIST[3]])
+    (w,b) = Train([commons.FEATURELIST[0],commons.FEATURELIST[1],commons.FEATURELIST[2],commons.FEATURELIST[3]])
     print "[Info]Loop5 testing."
-    resultlist = Test(w,[globals.FEATURELIST[4]])
+    resultlist = Test(w,b,[commons.FEATURELIST[4]])
     print "[Info]Loop5 evaluating."
     Evaluate(resultlist,5)
 
@@ -340,7 +341,7 @@ def SMO():
     
     logdata = "*******************************************************************************\n"
     logdata += "[Info]%s" % time.strftime("%Y-%m-%d %H:%M:%S\n", time.localtime())
-    logdata += "[Info]Iterate Time:%d\n" % globals.TIMES
+    logdata += "[Info]Iterate Time:%d\n" % commons.TIMES
     logdata += "[Info]Num of features: %d\n" % numoffeatures
     logdata += "[Data]avg_precision: %s\n" % str(avg_precision)
     logdata += "[Data]avg_recall: %s\n" % str(avg_recall)
@@ -358,8 +359,11 @@ def main():
     This is the main function.
     '''
     print "[Info]SMO start."
+    timestart = time.strftime("%Y-%m-%d %H:%M:%S\n", time.localtime())
     SMO()
+    timeend = time.strftime("%Y-%m-%d %H:%M:%S\n", time.localtime())
     print "[Info]SMO complete."
+    print "Timestart: %s\nTimeend: " % (timestart,timeend)
     raw_input("Press any key to continue.")
     
     
